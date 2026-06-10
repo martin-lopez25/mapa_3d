@@ -207,7 +207,7 @@ html, body {
 }
 
 .dashboard-btn button:hover {
-    transform: translateY(-2px);
+    transform: translateY(-1px);
     box-shadow: 0 4px 10px rgba(165,127,44,0.3);
 }
 
@@ -491,6 +491,37 @@ html, body {
 .leaflet-routing-container {
     display: none !important;
 }
+
+.distancia-popup .leaflet-popup-content-wrapper {
+    max-width: 350px;
+    min-width: 280px;
+}
+
+.distancia-popup .leaflet-popup-content {
+    margin: 8px 12px;
+}
+
+.distancia-popup .leaflet-popup-tip {
+    background: rgba(10,10,10,0.95);
+}
+
+.distancia-popup div::-webkit-scrollbar {
+    width: 6px;
+}
+
+.distancia-popup div::-webkit-scrollbar-track {
+    background: rgba(30,30,30,0.5);
+    border-radius: 3px;
+}
+
+.distancia-popup div::-webkit-scrollbar-thumb {
+    background: #A57F2C;
+    border-radius: 3px;
+}
+
+.distancia-popup div::-webkit-scrollbar-thumb:hover {
+    background: #4ecdc4;
+}
 </style>
 </head>
 <body>
@@ -606,7 +637,6 @@ var mapLoadingStarted = false;
 var currentSelectedClues = null;
 var currentSelectedMarker = null;
 
-// Funciones del loader
 function showLoader(texto) {
     var loader = document.getElementById("loaderOverlay");
     var loaderText = document.querySelector(".loader-text");
@@ -625,7 +655,6 @@ function hideLoader() {
     mapLoadingStarted = false;
 }
 
-// Funciones de resaltado en 3D
 function highlightUnit3D(clues) {
     if (!deckgl) return;
     var selectedUnit = unidadesData.find(u => u.clues === clues);
@@ -762,7 +791,81 @@ function highlightUnit2D(clues) {
     });
 }
 
-// Inicializar mapa 2D
+function calcularDistanciaAPuntosRelevantes(lat, lng) {
+    var distancias = [];
+
+    for (var i = 0; i < unidadesData.length; i++) {
+        var unidad = unidadesData[i];
+        var R = 6371;
+        var dLat = (unidad.lat - lat) * Math.PI / 180;
+        var dLon = (unidad.lng - lng) * Math.PI / 180;
+        var a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                Math.cos(lat * Math.PI / 180) * Math.cos(unidad.lat * Math.PI / 180) *
+                Math.sin(dLon/2) * Math.sin(dLon/2);
+        var c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+        var distancia = R * c;
+
+        distancias.push({
+            unidad: unidad,
+            distancia_km: distancia,
+            distancia_metros: distancia * 1000
+        });
+    }
+
+    distancias.sort(function(a, b) {
+        return a.distancia_km - b.distancia_km;
+    });
+
+    return distancias.slice(0, 5);
+}
+
+function mostrarPopupDistancias(lat, lng) {
+    var distancias = calcularDistanciaAPuntosRelevantes(lat, lng);
+
+    var popupContent = '<div style="font-family: Segoe UI, Arial, sans-serif; min-width: 280px; max-width: 320px;">' +
+        '<div style="background: linear-gradient(135deg, #A57F2C, #1E5B4F); padding: 8px; border-radius: 8px; margin: -8px -12px 8px -12px; text-align: center; color: white;">' +
+        '<strong>Distancias desde este punto</strong></div>' +
+        '<div style="margin-bottom: 10px; padding: 6px; background: rgba(165,127,44,0.1); border-radius: 6px; text-align: center;">' +
+        '<span style="color: #A57F2C;">Coordenadas:</span><br>' +
+        '<strong>' + lat.toFixed(6) + '°, ' + lng.toFixed(6) + '°</strong></div>' +
+        '<div style="max-height: 250px; overflow-y: auto;">';
+
+    for (var i = 0; i < distancias.length; i++) {
+        var item = distancias[i];
+        var unidad = item.unidad;
+        var distancia_km = item.distancia_km;
+        var distancia_metros = item.distancia_metros;
+
+        var distancia_texto;
+        if (distancia_km < 1) {
+            distancia_texto = Math.round(distancia_metros) + ' metros';
+        } else {
+            distancia_texto = distancia_km.toFixed(2) + ' km';
+        }
+
+        var unidadDataStr = JSON.stringify(unidad).replace(/"/g, '&quot;');
+
+        popupContent += '<div style="margin-bottom: 10px; padding: 8px; background: rgba(30,30,30,0.8); border-radius: 6px; border-left: 3px solid ' + unidad.color_hex + '; cursor: pointer;" onclick="centrarEnUnidad(' + unidadDataStr + ')">' +
+            '<div style="display: flex; justify-content: space-between; align-items: center;">' +
+            '<div><div style="font-weight: bold; color: #A57F2C; font-size: 12px;">' + unidad.clues + '</div>' +
+            '<div style="font-size: 10px; color: #ccc; margin-top: 2px;">' + unidad.nombre.substring(0, 35) + '...</div></div>' +
+            '<div style="text-align: right;"><div style="font-size: 14px; font-weight: bold; color: #4ecdc4;">' + distancia_texto + '</div>' +
+            '<div style="font-size: 9px; color: #888;">Avance: ' + unidad.avance + '</div></div></div></div>';
+    }
+
+    popupContent += '</div><div style="margin-top: 8px; padding-top: 6px; border-top: 1px solid rgba(165,127,44,0.3); font-size: 10px; text-align: center; color: #888;">' +
+        'Click en cualquier unidad para centrar el mapa</div></div>';
+
+    L.popup({
+        maxWidth: 350,
+        minWidth: 280,
+        className: 'distancia-popup'
+    })
+    .setLatLng([lat, lng])
+    .setContent(popupContent)
+    .openOn(map2D);
+}
+
 function initMap2D() {
     showLoader("Cargando mapa 2D...");
     setTimeout(function() {
@@ -773,40 +876,58 @@ function initMap2D() {
                 subdomains: 'abcd', minZoom: 4, maxZoom: 18, attribution: ''
             }).addTo(map2D);
 
-            unidadesData.forEach(function(unidad) {
+            map2D.on('click', function(e) {
+                var clickedOnMarker = false;
+                map2D.eachLayer(function(layer) {
+                    if (layer instanceof L.Marker) {
+                        var markerLatLng = layer.getLatLng();
+                        var distance = Math.sqrt(Math.pow(e.latlng.lat - markerLatLng.lat, 2) + Math.pow(e.latlng.lng - markerLatLng.lng, 2));
+                        if (distance < 0.0001) {
+                            clickedOnMarker = true;
+                        }
+                    }
+                });
+
+                if (!clickedOnMarker) {
+                    mostrarPopupDistancias(e.latlng.lat, e.latlng.lng);
+                }
+            });
+
+            for (var i = 0; i < unidadesData.length; i++) {
+                var unidad = unidadesData[i];
                 var icon = L.divIcon({
                     className: 'custom-marker',
                     html: '<div style="width: 6px; height: 6px; background-color: ' + unidad.color_hex + '; border-radius: 50%; border: 1px solid #A57F2C;"></div>',
                     iconSize: [6, 6], iconAnchor: [3, 3], popupAnchor: [0, -3]
                 });
                 var marker = L.marker([unidad.lat, unidad.lng], { icon: icon }).addTo(map2D);
-                marker.bindPopup(`
-                    <div style="font-family: 'Segoe UI', Arial, sans-serif; min-width: 180px;">
-                        <strong style="color: #A57F2C;">${unidad.nombre_de_la_unidad}</strong><br>
-                        <span style="font-size: 11px;">CLUES: ${unidad.clues}</span><br>
-                        <span style="font-size: 11px;">Avance Real: <span style="color:${unidad.color_hex}; font-weight:bold;">${unidad.avance}</span></span><br>
-                        <span style="font-size: 11px;">Avance Esperado: ${unidad.pct_dia_fmt}</span><br>
-                        <span style="font-size: 10px; color: #888;">${unidad.estado_semaforo}</span>
-                    </div>
-                `);
-                marker.on('click', function(e) {
-                    L.DomEvent.stopPropagation(e);
-                    if (selectedCluesList.length < 2 && !selectedCluesList.includes(unidad.clues)) {
-                        selectedCluesList.push(unidad.clues);
-                        actualizarPanelSeleccion2D();
-                        var newIcon = L.divIcon({
-                            className: 'custom-marker',
-                            html: '<div style="width: 10px; height: 10px; background-color: ' + unidad.color_hex + '; border-radius: 50%; border: 2px solid #4ecdc4;"></div>',
-                            iconSize: [10, 10], iconAnchor: [5, 5], popupAnchor: [0, -5]
-                        });
-                        marker.setIcon(newIcon);
-                        setTimeout(() => marker.setIcon(icon), 1500);
-                    } else if (selectedCluesList.length >= 2) {
-                        alert("Solo se pueden seleccionar 2 unidades para la ruta. Use 'Limpiar Ruta' para empezar de nuevo.");
-                    }
-                });
-            });
-            if (currentSelectedClues) setTimeout(() => highlightUnit2D(currentSelectedClues), 1000);
+                marker.bindPopup('<div style="font-family: Segoe UI, Arial, sans-serif; min-width: 180px;">' +
+                    '<strong style="color: #A57F2C;">' + unidad.nombre_de_la_unidad + '</strong><br>' +
+                    '<span style="font-size: 11px;">CLUES: ' + unidad.clues + '</span><br>' +
+                    '<span style="font-size: 11px;">Avance Real: <span style="color:' + unidad.color_hex + '; font-weight:bold;">' + unidad.avance + '</span></span><br>' +
+                    '<span style="font-size: 11px;">Avance Esperado: ' + unidad.pct_dia_fmt + '</span><br>' +
+                    '<span style="font-size: 10px; color: #888;">' + unidad.estado_semaforo + '</span></div>');
+                marker.on('click', (function(unidad, icon) {
+                    return function(e) {
+                        L.DomEvent.stopPropagation(e);
+                        if (selectedCluesList.length < 2 && selectedCluesList.indexOf(unidad.clues) === -1) {
+                            selectedCluesList.push(unidad.clues);
+                            actualizarPanelSeleccion2D();
+                            var newIcon = L.divIcon({
+                                className: 'custom-marker',
+                                html: '<div style="width: 10px; height: 10px; background-color: ' + unidad.color_hex + '; border-radius: 50%; border: 2px solid #4ecdc4;"></div>',
+                                iconSize: [10, 10], iconAnchor: [5, 5], popupAnchor: [0, -5]
+                            });
+                            marker.setIcon(newIcon);
+                            setTimeout(function() { marker.setIcon(icon); }, 1500);
+                        } else if (selectedCluesList.length >= 2) {
+                            alert("Solo se pueden seleccionar 2 unidades para la ruta. Use 'Limpiar Ruta' para empezar de nuevo.");
+                        }
+                    };
+                })(unidad, icon));
+            }
+
+            if (currentSelectedClues) setTimeout(function() { highlightUnit2D(currentSelectedClues); }, 1000);
             setTimeout(hideLoader, 2000);
         } catch(e) { console.error(e); hideLoader(); }
     }, 10);
@@ -819,12 +940,12 @@ function actualizarPanelSeleccion2D() {
         panel.innerHTML = '<div style="color:#888;text-align:center;">Selecciona unidades en el mapa 2D</div>';
         btn.disabled = true;
     } else if (selectedCluesList.length === 1) {
-        var u = unidadesData.find(d => d.clues === selectedCluesList[0]);
+        var u = unidadesData.find(function(d) { return d.clues === selectedCluesList[0]; });
         panel.innerHTML = '<div class="ruta-item"><div class="ruta-origen-destino">Origen: ' + u.clues + '</div><div>' + u.nombre.substring(0,40) + '</div></div><div style="color:#A57F2C;text-align:center;">Selecciona destino</div>';
         btn.disabled = true;
     } else {
-        var o = unidadesData.find(d => d.clues === selectedCluesList[0]);
-        var d = unidadesData.find(d => d.clues === selectedCluesList[1]);
+        var o = unidadesData.find(function(d) { return d.clues === selectedCluesList[0]; });
+        var d = unidadesData.find(function(dd) { return dd.clues === selectedCluesList[1]; });
         panel.innerHTML = '<div class="ruta-item"><div class="ruta-origen-destino">Origen: ' + o.clues + '</div><div>' + o.nombre.substring(0,35) + '</div></div><div class="ruta-item"><div class="ruta-origen-destino">Destino: ' + d.clues + '</div><div>' + d.nombre.substring(0,35) + '</div></div>';
         btn.disabled = false;
     }
@@ -832,15 +953,15 @@ function actualizarPanelSeleccion2D() {
 
 function trazarRuta2D() {
     if (selectedCluesList.length !== 2) return;
-    var o = unidadesData.find(d => d.clues === selectedCluesList[0]);
-    var d = unidadesData.find(d => d.clues === selectedCluesList[1]);
+    var o = unidadesData.find(function(d) { return d.clues === selectedCluesList[0]; });
+    var d = unidadesData.find(function(dd) { return dd.clues === selectedCluesList[1]; });
     if (!o || !d) return;
     if (routingControl) map2D.removeControl(routingControl);
     routingControl = L.Routing.control({
         waypoints: [L.latLng(o.lat, o.lng), L.latLng(d.lat, d.lng)],
         routeWhileDragging: false, showAlternatives: false,
         lineOptions: { styles: [{ color: '#4ecdc4', weight: 5, opacity: 0.8 }] },
-        createMarker: () => null,
+        createMarker: function() { return null; },
         router: L.Routing.osrmv1({ serviceUrl: 'https://router.project-osrm.org/route/v1' }),
         show: false
     }).addTo(map2D);
@@ -875,7 +996,7 @@ function toggleModo() {
         btn.textContent = "Cambiar a Modo 2D (Rutas)";
         selectedCluesList = [];
         if (routingControl) map2D.removeControl(routingControl);
-        setTimeout(() => {
+        setTimeout(function() {
             if (currentSelectedClues) highlightUnit3D(currentSelectedClues);
             setTimeout(hideLoader, 800);
         }, 100);
@@ -888,7 +1009,7 @@ function toggleModo() {
         resetHighlight3D();
         if (map2D) {
             map2D.invalidateSize();
-            if (currentSelectedClues) setTimeout(() => highlightUnit2D(currentSelectedClues), 500);
+            if (currentSelectedClues) setTimeout(function() { highlightUnit2D(currentSelectedClues); }, 500);
             setTimeout(hideLoader, 1500);
         } else {
             initMap2D();
@@ -931,9 +1052,9 @@ function initMap3D() {
                 extruded: true,
                 pickable: true,
                 elevationScale: 0.5,
-                getPosition: d => [d.lng, d.lat],
-                getElevation: d => d.altura,
-                getFillColor: d => [d.r, d.g, d.b, 200]
+                getPosition: function(d) { return [d.lng, d.lat]; },
+                getElevation: function(d) { return d.altura; },
+                getFillColor: function(d) { return [d.r, d.g, d.b, 200]; }
             })
         ]
     });
@@ -951,31 +1072,33 @@ function initMap3D() {
     });
 }
 
-// Buscador
 var buscadorInput = document.getElementById("buscadorClues");
 var resultadosDiv = document.getElementById("resultadosBusqueda");
 
 function buscarUnidades(texto) {
     if (texto.length < 2) { resultadosDiv.style.display = "none"; return []; }
     texto = texto.toLowerCase();
-    return unidadesData.filter(u => u.clues.toLowerCase().includes(texto) || u.nombre.toLowerCase().includes(texto)).slice(0,10);
+    return unidadesData.filter(function(u) {
+        return u.clues.toLowerCase().indexOf(texto) !== -1 || u.nombre.toLowerCase().indexOf(texto) !== -1;
+    }).slice(0,10);
 }
 
 function mostrarResultados(resultados) {
     resultadosDiv.innerHTML = "";
     if (resultados.length === 0) { resultadosDiv.style.display = "none"; return; }
-    resultados.forEach(u => {
+    for (var i = 0; i < resultados.length; i++) {
+        var u = resultados[i];
         var item = document.createElement("div");
         item.className = "resultado-item";
         item.innerHTML = '<div style="font-weight:bold;color:#A57F2C;font-size:13px;">' + u.clues + '</div><div style="font-size:11px;color:white;">' + u.nombre.substring(0,50) + '</div><div style="font-size:10px;color:#A57F2C;">Avance: ' + u.avance + '</div>';
-        item.onclick = () => centrarEnUnidad(u);
+        item.onclick = (function(u) { return function() { centrarEnUnidad(u); }; })(u);
         resultadosDiv.appendChild(item);
-    });
+    }
     resultadosDiv.style.display = "block";
 }
 
-buscadorInput.addEventListener("input", e => mostrarResultados(buscarUnidades(e.target.value)));
-document.addEventListener("click", e => {
+buscadorInput.addEventListener("input", function(e) { mostrarResultados(buscarUnidades(e.target.value)); });
+document.addEventListener("click", function(e) {
     if (!buscadorInput.contains(e.target) && !resultadosDiv.contains(e.target)) resultadosDiv.style.display = "none";
 });
 
